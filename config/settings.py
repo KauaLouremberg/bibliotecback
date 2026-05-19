@@ -16,6 +16,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 import dj_database_url
+from django.core.exceptions import ImproperlyConfigured
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -55,6 +56,7 @@ INSTALLED_APPS = [
     'rest_framework',
     'rest_framework_simplejwt',
     'accounts',
+    'library',
 ]
 
 MIDDLEWARE = [
@@ -106,20 +108,15 @@ def _database_url_implies_ssl_require(database_url: str) -> bool:
 
 
 _database_url = os.environ.get("DATABASE_URL")
-if _database_url:
-    DATABASES = {
-        "default": dj_database_url.config(
-            conn_max_age=600,
-            ssl_require=_database_url_implies_ssl_require(_database_url),
-        )
-    }
-else:
-    DATABASES = {
-        "default": {
-            "ENGINE": "django.db.backends.sqlite3",
-            "NAME": BASE_DIR / "db.sqlite3",
-        }
-    }
+if not _database_url:
+    raise ImproperlyConfigured("Defina DATABASE_URL com uma conexão PostgreSQL.")
+
+DATABASES = {
+    "default": dj_database_url.config(
+        conn_max_age=600,
+        ssl_require=_database_url_implies_ssl_require(_database_url),
+    )
+}
 
 
 # Password validation
@@ -185,5 +182,3 @@ SIMPLE_JWT = {
     "BLACKLIST_AFTER_ROTATION": False,
     "AUTH_HEADER_TYPES": ("Bearer",),
 }
-
-INSTITUTIONAL_EMAIL_DOMAIN = os.environ.get("INSTITUTIONAL_EMAIL_DOMAIN", "aluno.wyden.edu.br")

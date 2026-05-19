@@ -1,10 +1,5 @@
-from django.conf import settings
 from ninja import Schema
 from pydantic import EmailStr, Field, field_validator
-
-
-def _institutional_suffix() -> str:
-    return str(getattr(settings, "INSTITUTIONAL_EMAIL_DOMAIN", "aluno.wyden.edu.br")).strip().lower()
 
 
 class RegisterIn(Schema):
@@ -14,12 +9,8 @@ class RegisterIn(Schema):
 
     @field_validator("email")
     @classmethod
-    def email_institutional(cls, v: str) -> str:
-        suffix = _institutional_suffix()
-        local = v.strip().lower()
-        if not local.endswith(f"@{suffix}"):
-            raise ValueError(f"E-mail deve ser institucional (@{suffix})")
-        return local
+    def email_normalize(cls, v: str) -> str:
+        return v.strip().lower()
 
 
 class LoginIn(Schema):
