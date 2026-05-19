@@ -19,6 +19,7 @@ class InventoryBook(models.Model):
     author = models.CharField(max_length=255)
     description = models.TextField(blank=True)
     cover_url = models.URLField(blank=True)
+    cover_image = models.FileField(upload_to="books/covers/", blank=True)
     has_physical_copy = models.BooleanField(default=False)
     sharing_status = models.CharField(
         max_length=24,
@@ -69,3 +70,44 @@ class SocialPost(models.Model):
 
     def __str__(self) -> str:
         return f"{self.intent}:{self.book_title} - {self.owner}"
+
+
+class TradeRequest(models.Model):
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pendente"
+        ACCEPTED = "accepted", "Aceita"
+        REJECTED = "rejected", "Recusada"
+        COMPLETED = "completed", "Concluída"
+
+    requester = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="trade_requests_sent",
+    )
+    owner = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="trade_requests_received",
+    )
+    book_requested = models.ForeignKey(
+        InventoryBook,
+        on_delete=models.CASCADE,
+        related_name="trade_requests_received",
+    )
+    book_offered = models.ForeignKey(
+        InventoryBook,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="trade_requests_offered",
+    )
+    status = models.CharField(max_length=24, choices=Status.choices, default=Status.PENDING)
+    message = models.CharField(max_length=500, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at", "-updated_at"]
+
+    def __str__(self) -> str:
+        return f"trade:{self.book_requested} {self.requester}->{self.owner}"

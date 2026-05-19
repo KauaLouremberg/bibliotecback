@@ -7,6 +7,7 @@ from pydantic import field_validator
 
 SharingStatusValue = Literal["private", "showcase", "loan", "exchange", "donation"]
 PostIntentValue = Literal["need", "donation", "exchange", "loan", "offer"]
+TradeStatusValue = Literal["pending", "accepted", "rejected", "completed"]
 
 
 def _clean_text(value: str) -> str:
@@ -37,7 +38,6 @@ class InventoryBookIn(Schema):
     title: str = Field(min_length=2, max_length=255)
     author: str = Field(min_length=2, max_length=255)
     description: str = Field(default="", max_length=2000)
-    cover_url: str = Field(default="", max_length=500)
     has_physical_copy: bool = False
     sharing_status: SharingStatusValue = "private"
     location_label: str = Field(default="", max_length=120)
@@ -47,7 +47,7 @@ class InventoryBookIn(Schema):
     def trim_required(cls, value: str) -> str:
         return _clean_text(value)
 
-    @field_validator("description", "cover_url", "location_label")
+    @field_validator("description", "location_label")
     @classmethod
     def trim_optional(cls, value: str) -> str:
         return _clean_optional_text(value)
@@ -57,7 +57,6 @@ class InventoryBookUpdateIn(Schema):
     title: str | None = Field(default=None, min_length=2, max_length=255)
     author: str | None = Field(default=None, min_length=2, max_length=255)
     description: str | None = Field(default=None, max_length=2000)
-    cover_url: str | None = Field(default=None, max_length=500)
     has_physical_copy: bool | None = None
     sharing_status: SharingStatusValue | None = None
     location_label: str | None = Field(default=None, max_length=120)
@@ -69,7 +68,7 @@ class InventoryBookUpdateIn(Schema):
             return None
         return _clean_text(value)
 
-    @field_validator("description", "cover_url", "location_label")
+    @field_validator("description", "location_label")
     @classmethod
     def trim_optional(cls, value: str | None) -> str:
         return _clean_optional_text(value)
@@ -167,3 +166,46 @@ class FeedStatsOut(Schema):
 class FeedCollectionOut(Schema):
     items: list[SocialPostOut]
     stats: FeedStatsOut
+
+
+class TradeRequestIn(Schema):
+    book_requested_id: int
+    book_offered_id: int | None = None
+    message: str = Field(default="", max_length=500)
+
+    @field_validator("message")
+    @classmethod
+    def trim_message(cls, value: str) -> str:
+        return _clean_optional_text(value)
+
+
+class TradeRequestStatusIn(Schema):
+    status: Literal["accepted", "rejected", "completed"]
+
+
+class TradeRequestOut(Schema):
+    id: int
+    status: TradeStatusValue
+    message: str
+    requester: OwnerOut
+    owner: OwnerOut
+    book_requested: InventoryBookPreviewOut
+    book_offered: InventoryBookPreviewOut | None
+    is_incoming: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+class TradeRequestCollectionOut(Schema):
+    incoming: list[TradeRequestOut]
+    outgoing: list[TradeRequestOut]
+
+
+class DiscoverInventoryQuery(Schema):
+    search: str = Field(default="", max_length=255)
+    trade_status: Literal["loan", "exchange", "donation"] | None = None
+
+    @field_validator("search")
+    @classmethod
+    def trim_search(cls, value: str) -> str:
+        return _clean_optional_text(value)

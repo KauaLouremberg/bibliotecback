@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import InventoryBook, SocialPost
+from .models import InventoryBook, SocialPost, TradeRequest
 
 
 @admin.register(InventoryBook)
@@ -15,3 +15,17 @@ class SocialPostAdmin(admin.ModelAdmin):
     list_display = ("book_title", "book_author", "intent", "owner", "created_at")
     list_filter = ("intent",)
     search_fields = ("book_title", "book_author", "owner__email", "owner__full_name")
+
+
+@admin.register(TradeRequest)
+class TradeRequestAdmin(admin.ModelAdmin):
+    list_display = ("book_requested", "requester", "owner", "status", "created_at")
+    list_filter = ("status",)
+    search_fields = (
+        "book_requested__title",
+        "book_requested__author",
+        "requester__email",
+        "requester__full_name",
+        "owner__email",
+        "owner__full_name",
+    )
