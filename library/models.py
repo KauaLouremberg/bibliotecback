@@ -1,5 +1,6 @@
 from django.conf import settings
 from django.db import models
+from django.db.models import Q
 
 
 class InventoryBook(models.Model):
@@ -18,6 +19,11 @@ class InventoryBook(models.Model):
     title = models.CharField(max_length=255)
     author = models.CharField(max_length=255)
     description = models.TextField(blank=True)
+    genre = models.CharField(max_length=120, blank=True)
+    published_year = models.PositiveSmallIntegerField(null=True, blank=True)
+    publisher = models.CharField(max_length=160, blank=True)
+    isbn = models.CharField(max_length=32, blank=True)
+    page_count = models.PositiveSmallIntegerField(null=True, blank=True)
     cover_url = models.URLField(blank=True)
     cover_image = models.FileField(upload_to="books/covers/", blank=True)
     has_physical_copy = models.BooleanField(default=False)
@@ -35,6 +41,35 @@ class InventoryBook(models.Model):
 
     def __str__(self) -> str:
         return f"{self.title} - {self.owner}"
+
+
+class BookRating(models.Model):
+    book = models.ForeignKey(
+        InventoryBook,
+        on_delete=models.CASCADE,
+        related_name="ratings",
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="book_ratings",
+    )
+    rating = models.PositiveSmallIntegerField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["book", "user"], name="unique_book_rating_per_user"),
+            models.CheckConstraint(
+                condition=Q(rating__gte=1) & Q(rating__lte=5),
+                name="book_rating_between_1_and_5",
+            ),
+        ]
+        ordering = ["-updated_at", "-created_at"]
+
+    def __str__(self) -> str:
+        return f"{self.book_id}:{self.user_id}={self.rating}"
 
 
 class SocialPost(models.Model):

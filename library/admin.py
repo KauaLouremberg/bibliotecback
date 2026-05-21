@@ -1,13 +1,20 @@
 from django.contrib import admin
 
-from .models import InventoryBook, SocialPost, TradeRequest
+from .models import BookRating, InventoryBook, SocialPost, TradeRequest
 
 
 @admin.register(InventoryBook)
 class InventoryBookAdmin(admin.ModelAdmin):
-    list_display = ("title", "author", "owner", "sharing_status", "has_physical_copy", "updated_at")
-    list_filter = ("sharing_status", "has_physical_copy")
-    search_fields = ("title", "author", "owner__email", "owner__full_name")
+    list_display = ("title", "author", "genre", "owner", "sharing_status", "has_physical_copy", "updated_at")
+    list_filter = ("sharing_status", "has_physical_copy", "genre")
+    search_fields = ("title", "author", "genre", "isbn", "owner__email", "owner__full_name")
+
+
+@admin.register(BookRating)
+class BookRatingAdmin(admin.ModelAdmin):
+    list_display = ("book", "user", "rating", "updated_at")
+    list_filter = ("rating",)
+    search_fields = ("book__title", "book__author", "user__email", "user__full_name")
 
 
 @admin.register(SocialPost)

@@ -38,6 +38,12 @@ class InventoryBookIn(Schema):
     title: str = Field(min_length=2, max_length=255)
     author: str = Field(min_length=2, max_length=255)
     description: str = Field(default="", max_length=2000)
+    genre: str = Field(default="", max_length=120)
+    published_year: int | None = Field(default=None, ge=0, le=9999)
+    publisher: str = Field(default="", max_length=160)
+    isbn: str = Field(default="", max_length=32)
+    page_count: int | None = Field(default=None, ge=0, le=9999)
+    cover_url: str = Field(default="", max_length=500)
     has_physical_copy: bool = False
     sharing_status: SharingStatusValue = "private"
     location_label: str = Field(default="", max_length=120)
@@ -47,7 +53,7 @@ class InventoryBookIn(Schema):
     def trim_required(cls, value: str) -> str:
         return _clean_text(value)
 
-    @field_validator("description", "location_label")
+    @field_validator("description", "genre", "publisher", "isbn", "cover_url", "location_label")
     @classmethod
     def trim_optional(cls, value: str) -> str:
         return _clean_optional_text(value)
@@ -57,6 +63,12 @@ class InventoryBookUpdateIn(Schema):
     title: str | None = Field(default=None, min_length=2, max_length=255)
     author: str | None = Field(default=None, min_length=2, max_length=255)
     description: str | None = Field(default=None, max_length=2000)
+    genre: str | None = Field(default=None, max_length=120)
+    published_year: int | None = Field(default=None, ge=0, le=9999)
+    publisher: str | None = Field(default=None, max_length=160)
+    isbn: str | None = Field(default=None, max_length=32)
+    page_count: int | None = Field(default=None, ge=0, le=9999)
+    cover_url: str | None = Field(default=None, max_length=500)
     has_physical_copy: bool | None = None
     sharing_status: SharingStatusValue | None = None
     location_label: str | None = Field(default=None, max_length=120)
@@ -68,9 +80,11 @@ class InventoryBookUpdateIn(Schema):
             return None
         return _clean_text(value)
 
-    @field_validator("description", "location_label")
+    @field_validator("description", "genre", "publisher", "isbn", "cover_url", "location_label")
     @classmethod
-    def trim_optional(cls, value: str | None) -> str:
+    def trim_optional(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         return _clean_optional_text(value)
 
 
@@ -79,6 +93,11 @@ class InventoryBookOut(Schema):
     title: str
     author: str
     description: str
+    genre: str
+    published_year: int | None
+    publisher: str
+    isbn: str
+    page_count: int | None
     cover_url: str
     has_physical_copy: bool
     sharing_status: SharingStatusValue
@@ -86,6 +105,9 @@ class InventoryBookOut(Schema):
     owner: OwnerOut
     is_owner: bool
     matches_waiting: int
+    average_rating: float
+    rating_count: int
+    my_rating: int | None
     created_at: datetime
     updated_at: datetime
 
@@ -100,6 +122,38 @@ class InventoryStatsOut(Schema):
 class InventoryCollectionOut(Schema):
     items: list[InventoryBookOut]
     stats: InventoryStatsOut
+
+
+class CatalogBookOut(Schema):
+    id: str
+    title: str
+    author: str
+    description: str
+    genre: str
+    cover_url: str
+    published_year: int | None
+    publisher: str
+    isbn: str
+    page_count: int | None
+
+
+class CatalogCollectionOut(Schema):
+    items: list[CatalogBookOut]
+    genres: list[str]
+
+
+class CatalogQuery(Schema):
+    search: str = Field(default="", max_length=255)
+    genre: str = Field(default="", max_length=120)
+
+    @field_validator("search", "genre")
+    @classmethod
+    def trim_catalog_filter(cls, value: str) -> str:
+        return _clean_optional_text(value)
+
+
+class BookRatingIn(Schema):
+    rating: int = Field(ge=1, le=5)
 
 
 class SocialPostIn(Schema):
@@ -138,7 +192,9 @@ class SocialPostUpdateIn(Schema):
 
     @field_validator("caption", "location_label")
     @classmethod
-    def trim_optional(cls, value: str | None) -> str:
+    def trim_optional(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         return _clean_optional_text(value)
 
 
@@ -204,8 +260,9 @@ class TradeRequestCollectionOut(Schema):
 class DiscoverInventoryQuery(Schema):
     search: str = Field(default="", max_length=255)
     trade_status: Literal["loan", "exchange", "donation"] | None = None
+    genre: str = Field(default="", max_length=120)
 
-    @field_validator("search")
+    @field_validator("search", "genre")
     @classmethod
     def trim_search(cls, value: str) -> str:
         return _clean_optional_text(value)
