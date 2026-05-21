@@ -1,0 +1,16 @@
+{
+  "include": ["accounts", "config", "library", "manage.py"],
+  "exclude": [".venv", "**/__pycache__", "**/migrations"],
+  "venvPath": ".",
+  "venv": ".venv",
+  "pythonVersion": "3.14",
+  "typeCheckingMode": "off",
+  "reportMissingImports": "none",
+  "reportMissingModuleSource": "none",
+  "reportAttributeAccessIssue": "none",
+  "reportArgumentType": "none",
+  "reportAssignmentType": "none",
+  "reportReturnType": "none",
+  "reportCallIssue": "none",
+  "reportGeneralTypeIssues": "none"
+}

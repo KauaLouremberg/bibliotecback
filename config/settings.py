@@ -1,25 +1,46 @@
 import os
+import socket
 from datetime import timedelta
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 import dj_database_url
 from django.core.exceptions import ImproperlyConfigured
+from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+load_dotenv(BASE_DIR / ".env")
 
-SECRET_KEY = os.environ.get(
+SECRET_KEY = os.getenv(
     "DJANGO_SECRET_KEY",
     "django-insecure-dcg4gxd_tlcau9wbxn0yy@lg$5vm##utbx=@qiz9pn1785-%aj",
 )
 
-DEBUG = os.environ.get("DJANGO_DEBUG", "1") == "1"
+DEBUG = os.getenv("DJANGO_DEBUG", "1") == "1"
 
-ALLOWED_HOSTS = [
+def _default_allowed_hosts() -> list[str]:
+    hosts = ["localhost", "127.0.0.1", "10.0.2.2"]
+    if DEBUG:
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+                sock.connect(("8.8.8.8", 80))
+                hosts.append(sock.getsockname()[0])
+        except OSError:
+            pass
+    return hosts
+
+
+_hosts_from_env = [
     h.strip()
-    for h in os.environ.get("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
+    for h in os.getenv("DJANGO_ALLOWED_HOSTS", "").split(",")
     if h.strip()
 ]
+ALLOWED_HOSTS = list(
+    dict.fromkeys(
+        (_hosts_from_env or _default_allowed_hosts())
+        + (_default_allowed_hosts() if DEBUG else [])
+    )
+)
 
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -79,7 +100,7 @@ def _database_url_implies_ssl_require(database_url: str) -> bool:
     return False
 
 
-_database_url = os.environ.get("DATABASE_URL")
+_database_url = os.getenv("DATABASE_URL")
 if not _database_url:
     raise ImproperlyConfigured("Defina DATABASE_URL com uma conexão PostgreSQL.")
 
@@ -120,9 +141,10 @@ MEDIA_ROOT = BASE_DIR / "media"
 AUTH_USER_MODEL = "accounts.User"
 
 CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOW_ALL_ORIGINS = DEBUG
 CORS_ALLOWED_ORIGINS = [
     o.strip()
-    for o in os.environ.get(
+    for o in os.getenv(
         "CORS_ALLOWED_ORIGINS",
         "http://localhost:8081,http://127.0.0.1:8081,exp://127.0.0.1:8081",
     ).split(",")
@@ -136,8 +158,8 @@ REST_FRAMEWORK = {
 }
 
 SIMPLE_JWT = {
-    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=int(os.environ.get("JWT_ACCESS_MINUTES", "60"))),
-    "REFRESH_TOKEN_LIFETIME": timedelta(days=int(os.environ.get("JWT_REFRESH_DAYS", "7"))),
+    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=int(os.getenv("JWT_ACCESS_MINUTES", "60"))),
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=int(os.getenv("JWT_REFRESH_DAYS", "7"))),
     "ROTATE_REFRESH_TOKENS": False,
     "BLACKLIST_AFTER_ROTATION": False,
     "AUTH_HEADER_TYPES": ("Bearer",),
