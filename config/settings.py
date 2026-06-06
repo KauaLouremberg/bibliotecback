@@ -35,20 +35,33 @@ _hosts_from_env = [
     for h in os.getenv("DJANGO_ALLOWED_HOSTS", "").split(",")
     if h.strip()
 ]
+_render_external = os.getenv("RENDER_EXTERNAL_URL", "").strip()
+if _render_external and not DEBUG:
+    try:
+        from urllib.parse import urlparse
+
+        render_host = urlparse(_render_external).netloc
+        if render_host:
+            _hosts_from_env.append(render_host)
+    except ValueError:
+        pass
+_default_prod_hosts = [".onrender.com"] if not DEBUG else []
 ALLOWED_HOSTS = list(
     dict.fromkeys(
-        (_hosts_from_env or _default_allowed_hosts())
+        (_hosts_from_env or _default_allowed_hosts() + _default_prod_hosts)
         + (_default_allowed_hosts() if DEBUG else [])
     )
 )
 
 INSTALLED_APPS = [
+    'daphne',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'channels',
     'corsheaders',
     'rest_framework',
     'rest_framework_simplejwt',
@@ -86,6 +99,25 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = 'config.wsgi.application'
+ASGI_APPLICATION = 'config.asgi.application'
+
+REDIS_URL = os.getenv("REDIS_URL", "").strip()
+
+if REDIS_URL:
+    CHANNEL_LAYERS = {
+        "default": {
+            "BACKEND": "channels_redis.core.RedisChannelLayer",
+            "CONFIG": {
+                "hosts": [REDIS_URL],
+            },
+        },
+    }
+else:
+    CHANNEL_LAYERS = {
+        "default": {
+            "BACKEND": "channels.layers.InMemoryChannelLayer",
+        },
+    }
 
 
 def _database_url_implies_ssl_require(database_url: str) -> bool:
@@ -150,6 +182,17 @@ CORS_ALLOWED_ORIGINS = [
     ).split(",")
     if o.strip()
 ]
+
+if not DEBUG:
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+    _csrf_origins = [
+        o.strip()
+        for o in os.getenv("CSRF_TRUSTED_ORIGINS", "").split(",")
+        if o.strip()
+    ]
+    if _render_external:
+        _csrf_origins.append(_render_external.rstrip("/"))
+    CSRF_TRUSTED_ORIGINS = list(dict.fromkeys(_csrf_origins))
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (

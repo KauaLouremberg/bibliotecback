@@ -107,6 +107,59 @@ class SocialPost(models.Model):
         return f"{self.intent}:{self.book_title} - {self.owner}"
 
 
+class SignalChatThread(models.Model):
+    post = models.ForeignKey(
+        SocialPost,
+        on_delete=models.CASCADE,
+        related_name="chat_threads",
+    )
+    initiator = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="signal_chats_started",
+    )
+    owner = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="signal_chats_received",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    last_message_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["post", "initiator"],
+                name="unique_signal_chat_per_post_initiator",
+            ),
+        ]
+        ordering = ["-last_message_at", "-created_at"]
+
+    def __str__(self) -> str:
+        return f"chat:post={self.post_id} initiator={self.initiator_id}"
+
+
+class SignalChatMessage(models.Model):
+    thread = models.ForeignKey(
+        SignalChatThread,
+        on_delete=models.CASCADE,
+        related_name="messages",
+    )
+    sender = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="signal_chat_messages",
+    )
+    body = models.TextField(max_length=2000)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["created_at", "id"]
+
+    def __str__(self) -> str:
+        return f"msg:{self.thread_id} from {self.sender_id}"
+
+
 class TradeRequest(models.Model):
     class Status(models.TextChoices):
         PENDING = "pending", "Pendente"

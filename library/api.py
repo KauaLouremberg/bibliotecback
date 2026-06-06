@@ -11,7 +11,14 @@ from accounts.auth import JwtAuth
 from accounts.models import User
 from accounts.schemas import MessageOut
 
-from .models import BookRating, InventoryBook, SocialPost, TradeRequest
+from .models import BookRating, InventoryBook, SignalChatMessage, SignalChatThread, SocialPost, TradeRequest
+from .chat_services import (
+    broadcast_chat_message,
+    close_signal_chat,
+    create_chat_message,
+    get_thread_for_user,
+    open_signal_chat,
+)
 from .schemas import (
     BookRatingIn,
     CatalogCollectionOut,
@@ -29,6 +36,13 @@ from .schemas import (
     SocialPostIn,
     SocialPostOut,
     SocialPostUpdateIn,
+    SignalChatMessageCollectionOut,
+    SignalChatMessageIn,
+    SignalChatMessageOut,
+    SignalChatOpenOut,
+    SignalChatPostPreviewOut,
+    SignalChatThreadCollectionOut,
+    SignalChatThreadOut,
     TradeRequestCollectionOut,
     TradeRequestIn,
     TradeRequestOut,
@@ -720,6 +734,152 @@ def delete_post(request, post_id: int):
     if deleted == 0:
         return 404, MessageOut(detail="Sinal não encontrado.")
     return 204, None
+
+
+def _chat_message_out(message: SignalChatMessage) -> SignalChatMessageOut:
+    sender = message.sender
+    return SignalChatMessageOut(
+        id=message.pk,
+        thread_id=message.thread_id,
+        sender_id=sender.pk,
+        sender_name=sender.full_name or sender.email,
+        body=message.body,
+        created_at=message.created_at,
+    )
+
+
+def _chat_thread_out(thread: SignalChatThread, viewer_id: int) -> SignalChatThreadOut:
+    post = thread.post
+    initiator = thread.initiator
+    owner = thread.owner
+    is_owner = viewer_id == owner.pk
+    other = initiator if is_owner else owner
+    return SignalChatThreadOut(
+        id=thread.pk,
+        post=SignalChatPostPreviewOut(
+            id=post.pk,
+            book_title=post.book_title,
+            book_author=post.book_author,
+            intent=post.intent,
+        ),
+        initiator=_owner_out(initiator),
+        owner=_owner_out(owner),
+        is_owner=is_owner,
+        other_participant=_owner_out(other),
+        last_message_at=thread.last_message_at,
+        created_at=thread.created_at,
+    )
+
+
+def _thread_messages(thread_id: int, limit: int = 50, before_id: int | None = None) -> tuple[list[SignalChatMessage], bool]:
+    query = SignalChatMessage.objects.filter(thread_id=thread_id).select_related("sender").order_by("-id")
+    if before_id is not None:
+        query = query.filter(id__lt=before_id)
+    rows = list(query[: limit + 1])
+    has_more = len(rows) > limit
+    if has_more:
+        rows = rows[:limit]
+    rows.reverse()
+    return rows, has_more
+
+
+@router.post(
+    "/feed/{post_id}/chat/open",
+    response={200: SignalChatOpenOut, 400: MessageOut, 404: MessageOut},
+    auth=JwtAuth(),
+)
+def open_signal_chat_thread(request, post_id: int):
+    viewer: User = request.auth
+    post = SocialPost.objects.select_related("owner").filter(pk=post_id).first()
+    if post is None:
+        return 404, MessageOut(detail="Sinal não encontrado.")
+    thread, error = open_signal_chat(post, viewer)
+    if error:
+        return 400, MessageOut(detail=error)
+    thread = (
+        SignalChatThread.objects.select_related("post", "initiator", "owner")
+        .get(pk=thread.pk)
+    )
+    messages, _ = _thread_messages(thread.pk)
+    return 200, SignalChatOpenOut(
+        thread=_chat_thread_out(thread, viewer_id=viewer.pk),
+        messages=[_chat_message_out(m) for m in messages],
+    )
+
+
+@router.get("/chats", response=SignalChatThreadCollectionOut, auth=JwtAuth())
+def list_signal_chats(request):
+    viewer: User = request.auth
+    threads = list(
+        SignalChatThread.objects.filter(Q(initiator=viewer) | Q(owner=viewer))
+        .select_related("post", "initiator", "owner")
+        .order_by("-last_message_at", "-created_at")
+    )
+    return SignalChatThreadCollectionOut(
+        items=[_chat_thread_out(thread, viewer_id=viewer.pk) for thread in threads],
+    )
+
+
+@router.get(
+    "/chats/{thread_id}",
+    response={200: SignalChatThreadOut, 404: MessageOut},
+    auth=JwtAuth(),
+)
+def get_signal_chat_thread(request, thread_id: int):
+    viewer: User = request.auth
+    thread = get_thread_for_user(viewer, thread_id)
+    if thread is None:
+        return 404, MessageOut(detail="Conversa não encontrada.")
+    return 200, _chat_thread_out(thread, viewer_id=viewer.pk)
+
+
+@router.delete(
+    "/chats/{thread_id}",
+    response={204: None, 404: MessageOut},
+    auth=JwtAuth(),
+)
+def close_signal_chat_thread(request, thread_id: int):
+    viewer: User = request.auth
+    closed, error = close_signal_chat(viewer, thread_id)
+    if not closed:
+        return 404, MessageOut(detail=error or "Conversa não encontrada.")
+    return 204, None
+
+
+@router.get(
+    "/chats/{thread_id}/messages",
+    response={200: SignalChatMessageCollectionOut, 404: MessageOut},
+    auth=JwtAuth(),
+)
+def list_signal_chat_messages(request, thread_id: int, before_id: int | None = None, limit: int = 50):
+    viewer: User = request.auth
+    thread = get_thread_for_user(viewer, thread_id)
+    if thread is None:
+        return 404, MessageOut(detail="Conversa não encontrada.")
+    safe_limit = max(1, min(limit, 100))
+    messages, has_more = _thread_messages(thread_id, limit=safe_limit, before_id=before_id)
+    return 200, SignalChatMessageCollectionOut(
+        items=[_chat_message_out(m) for m in messages],
+        has_more=has_more,
+    )
+
+
+@router.post(
+    "/chats/{thread_id}/messages",
+    response={201: SignalChatMessageOut, 400: MessageOut, 404: MessageOut},
+    auth=JwtAuth(),
+)
+def send_signal_chat_message(request, thread_id: int, payload: SignalChatMessageIn):
+    viewer: User = request.auth
+    thread = get_thread_for_user(viewer, thread_id)
+    if thread is None:
+        return 404, MessageOut(detail="Conversa não encontrada.")
+    message = create_chat_message(thread, viewer, payload.body)
+    if message is None:
+        return 400, MessageOut(detail="Mensagem inválida.")
+    message = SignalChatMessage.objects.select_related("sender").get(pk=message.pk)
+    broadcast_chat_message(message)
+    return 201, _chat_message_out(message)
 
 
 @router.post("/trades", response={201: TradeRequestOut, 400: MessageOut, 404: MessageOut}, auth=JwtAuth())

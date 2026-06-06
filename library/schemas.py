@@ -266,3 +266,54 @@ class DiscoverInventoryQuery(Schema):
     @classmethod
     def trim_search(cls, value: str) -> str:
         return _clean_optional_text(value)
+
+
+class SignalChatPostPreviewOut(Schema):
+    id: int
+    book_title: str
+    book_author: str
+    intent: PostIntentValue
+
+
+class SignalChatMessageOut(Schema):
+    id: int
+    thread_id: int
+    sender_id: int
+    sender_name: str
+    body: str
+    created_at: datetime
+
+
+class SignalChatThreadOut(Schema):
+    id: int
+    post: SignalChatPostPreviewOut
+    initiator: OwnerOut
+    owner: OwnerOut
+    is_owner: bool
+    other_participant: OwnerOut
+    last_message_at: datetime
+    created_at: datetime
+
+
+class SignalChatThreadCollectionOut(Schema):
+    items: list[SignalChatThreadOut]
+
+
+class SignalChatMessageCollectionOut(Schema):
+    items: list[SignalChatMessageOut]
+    has_more: bool
+
+
+class SignalChatOpenOut(Schema):
+    thread: SignalChatThreadOut
+    messages: list[SignalChatMessageOut]
+
+
+class SignalChatMessageIn(Schema):
+    body: str = Field(min_length=1, max_length=2000)
+
+    @field_validator("body")
+    @classmethod
+    def trim_body(cls, value: str) -> str:
+        return _clean_text(value)
+

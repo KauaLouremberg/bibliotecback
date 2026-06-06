@@ -1,0 +1,37 @@
+# Blueprint Render — Acervo API (Django + Channels)
+# Banco: Supabase Postgres (DATABASE_URL manual no Dashboard)
+# Docs: DEPLOY.md
+
+services:
+  - type: web
+    name: acervo-api
+    runtime: python
+    plan: free
+    region: virginia
+    branch: main
+    buildCommand: pip install -r requirements.txt && python manage.py migrate --noinput
+    startCommand: uvicorn config.asgi:application --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.7"
+      - key: DJANGO_DEBUG
+        value: "0"
+      - key: DJANGO_ALLOWED_HOSTS
+        value: .onrender.com
+      - key: DATABASE_URL
+        sync: false
+      - key: DJANGO_SECRET_KEY
+        generateValue: true
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: acervo-redis
+          property: connectionString
+
+  - type: keyvalue
+    name: acervo-redis
+    plan: free
+    region: virginia
+    maxmemoryPolicy: allkeys-lru
+    ipAllowList: []
