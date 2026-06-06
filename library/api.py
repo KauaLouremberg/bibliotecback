@@ -91,11 +91,15 @@ def _media_url(request, file_field, fallback: str) -> str:
     return fallback
 
 
-def _book_preview(book: InventoryBook) -> InventoryBookPreviewOut:
+def _book_preview(book: InventoryBook, request=None) -> InventoryBookPreviewOut:
+    cover_url = book.cover_url
+    if request is not None:
+        cover_url = _media_url(request, book.cover_image, book.cover_url)
     return InventoryBookPreviewOut(
         id=book.pk,
         title=book.title,
         author=book.author,
+        cover_url=cover_url,
         has_physical_copy=book.has_physical_copy,
         sharing_status=book.sharing_status,
     )
@@ -272,7 +276,7 @@ def _book_out(
     )
 
 
-def _post_out(post: SocialPost, viewer_id: int) -> SocialPostOut:
+def _post_out(post: SocialPost, viewer_id: int, request=None) -> SocialPostOut:
     return SocialPostOut(
         id=post.pk,
         intent=post.intent,
@@ -282,21 +286,30 @@ def _post_out(post: SocialPost, viewer_id: int) -> SocialPostOut:
         location_label=post.location_label,
         owner=_owner_out(post.owner),
         is_owner=post.owner_id == viewer_id,
-        inventory_book=_book_preview(post.inventory_book) if post.inventory_book else None,
+        inventory_book=_book_preview(post.inventory_book, request) if post.inventory_book else None,
         created_at=post.created_at,
         updated_at=post.updated_at,
     )
 
 
-def _trade_out(trade: TradeRequest, viewer_id: int) -> TradeRequestOut:
+def _feed_stats(posts: list[SocialPost]) -> FeedStatsOut:
+    return FeedStatsOut(
+        need_posts=sum(1 for post in posts if post.intent == SocialPost.Intent.NEED),
+        donation_posts=sum(1 for post in posts if post.intent == SocialPost.Intent.DONATION),
+        exchange_posts=sum(1 for post in posts if post.intent == SocialPost.Intent.EXCHANGE),
+        loan_posts=sum(1 for post in posts if post.intent == SocialPost.Intent.LOAN),
+    )
+
+
+def _trade_out(trade: TradeRequest, viewer_id: int, request=None) -> TradeRequestOut:
     return TradeRequestOut(
         id=trade.pk,
         status=trade.status,
         message=trade.message,
         requester=_owner_out(trade.requester),
         owner=_owner_out(trade.owner),
-        book_requested=_book_preview(trade.book_requested),
-        book_offered=_book_preview(trade.book_offered) if trade.book_offered else None,
+        book_requested=_book_preview(trade.book_requested, request),
+        book_offered=_book_preview(trade.book_offered, request) if trade.book_offered else None,
         is_incoming=trade.owner_id == viewer_id,
         created_at=trade.created_at,
         updated_at=trade.updated_at,
@@ -719,16 +732,28 @@ def delete_inventory_book(request, book_id: int):
 @router.get("/feed", response=FeedCollectionOut, auth=JwtAuth())
 def list_feed(request):
     viewer: User = request.auth
-    posts = list(SocialPost.objects.select_related("owner", "inventory_book"))
-    stats = FeedStatsOut(
-        need_posts=sum(1 for post in posts if post.intent == SocialPost.Intent.NEED),
-        donation_posts=sum(1 for post in posts if post.intent == SocialPost.Intent.DONATION),
-        exchange_posts=sum(1 for post in posts if post.intent == SocialPost.Intent.EXCHANGE),
-        loan_posts=sum(1 for post in posts if post.intent == SocialPost.Intent.LOAN),
+    posts = list(
+        SocialPost.objects.exclude(owner=viewer)
+        .select_related("owner", "inventory_book")
+        .order_by("-created_at")
     )
     return FeedCollectionOut(
-        items=[_post_out(post, viewer_id=viewer.pk) for post in posts],
-        stats=stats,
+        items=[_post_out(post, viewer_id=viewer.pk, request=request) for post in posts],
+        stats=_feed_stats(posts),
+    )
+
+
+@router.get("/feed/mine", response=FeedCollectionOut, auth=JwtAuth())
+def list_my_feed(request):
+    viewer: User = request.auth
+    posts = list(
+        SocialPost.objects.filter(owner=viewer)
+        .select_related("owner", "inventory_book")
+        .order_by("-created_at")
+    )
+    return FeedCollectionOut(
+        items=[_post_out(post, viewer_id=viewer.pk, request=request) for post in posts],
+        stats=_feed_stats(posts),
     )
 
 
@@ -747,7 +772,7 @@ def create_post(request, payload: SocialPostIn):
         caption=payload.caption,
         location_label=payload.location_label,
     )
-    return 201, _post_out(post, viewer_id=owner.pk)
+    return 201, _post_out(post, viewer_id=owner.pk, request=request)
 
 
 @router.patch("/feed/{post_id}", response={200: SocialPostOut, 400: MessageOut, 404: MessageOut}, auth=JwtAuth())
@@ -762,7 +787,7 @@ def update_post(request, post_id: int, payload: SocialPostUpdateIn):
     ):
         return 400, MessageOut(detail="Livro do inventário não encontrado.")
     post = _apply_post_updates(post, payload, owner)
-    return 200, _post_out(post, viewer_id=owner.pk)
+    return 200, _post_out(post, viewer_id=owner.pk, request=request)
 
 
 @router.delete("/feed/{post_id}", response={204: None, 404: MessageOut}, auth=JwtAuth())
@@ -947,7 +972,7 @@ def create_trade_request(request, payload: TradeRequestIn):
         )
         .get(pk=trade.pk)
     )
-    return 201, _trade_out(trade, viewer_id=requester.pk)
+    return 201, _trade_out(trade, viewer_id=requester.pk, request=request)
 
 
 @router.get("/trades/mine", response=TradeRequestCollectionOut, auth=JwtAuth())
@@ -962,8 +987,8 @@ def list_my_trades(request):
         .select_related("requester", "owner", "book_requested", "book_offered")
     )
     return TradeRequestCollectionOut(
-        incoming=[_trade_out(trade, viewer_id=viewer.pk) for trade in incoming],
-        outgoing=[_trade_out(trade, viewer_id=viewer.pk) for trade in outgoing],
+        incoming=[_trade_out(trade, viewer_id=viewer.pk, request=request) for trade in incoming],
+        outgoing=[_trade_out(trade, viewer_id=viewer.pk, request=request) for trade in outgoing],
     )
 
 
@@ -988,4 +1013,4 @@ def update_trade_status(request, trade_id: int, payload: TradeRequestStatusIn):
         return 400, MessageOut(detail=detail or "Atualização inválida.")
     trade.status = payload.status
     trade.save(update_fields=["status", "updated_at"])
-    return 200, _trade_out(trade, viewer_id=viewer.pk)
+    return 200, _trade_out(trade, viewer_id=viewer.pk, request=request)

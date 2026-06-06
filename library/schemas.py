@@ -30,6 +30,7 @@ class InventoryBookPreviewOut(Schema):
     id: int
     title: str
     author: str
+    cover_url: str = ""
     has_physical_copy: bool
     sharing_status: SharingStatusValue
 
