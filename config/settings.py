@@ -138,7 +138,9 @@ if not _database_url:
 
 DATABASES = {
     "default": dj_database_url.config(
-        conn_max_age=600,
+        default=_database_url,
+        conn_max_age=0,
+        conn_health_checks=True,
         ssl_require=_database_url_implies_ssl_require(_database_url),
     )
 }
