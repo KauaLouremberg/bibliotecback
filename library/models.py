@@ -160,6 +160,43 @@ class SignalChatMessage(models.Model):
         return f"msg:{self.thread_id} from {self.sender_id}"
 
 
+class LibraryNotification(models.Model):
+    class Kind(models.TextChoices):
+        CHAT_STARTED = "chat_started", "Chat iniciado"
+        CHAT_MESSAGE = "chat_message", "Mensagem de chat"
+        TRADE_RECEIVED = "trade_received", "Proposta recebida"
+        TRADE_ACCEPTED = "trade_accepted", "Proposta aceita"
+        TRADE_REJECTED = "trade_rejected", "Proposta recusada"
+        TRADE_COMPLETED = "trade_completed", "Negociação concluída"
+
+    recipient = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="library_notifications",
+    )
+    kind = models.CharField(max_length=32, choices=Kind.choices)
+    title = models.CharField(max_length=255)
+    body = models.CharField(max_length=500)
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="library_notifications_sent",
+    )
+    thread_id = models.PositiveIntegerField(null=True, blank=True)
+    trade_id = models.PositiveIntegerField(null=True, blank=True)
+    post_id = models.PositiveIntegerField(null=True, blank=True)
+    read_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+
+    def __str__(self) -> str:
+        return f"{self.kind} -> {self.recipient_id}"
+
+
 class TradeRequest(models.Model):
     class Status(models.TextChoices):
         PENDING = "pending", "Pendente"

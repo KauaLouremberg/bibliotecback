@@ -141,11 +141,17 @@ class CatalogBookOut(Schema):
 class CatalogCollectionOut(Schema):
     items: list[CatalogBookOut]
     genres: list[str]
+    total: int
+    page: int
+    limit: int
+    has_more: bool
 
 
 class CatalogQuery(Schema):
     search: str = Field(default="", max_length=255)
     genre: str = Field(default="", max_length=120)
+    page: int = Field(default=1, ge=1, le=200)
+    limit: int = Field(default=24, ge=1, le=50)
 
     @field_validator("search", "genre")
     @classmethod
@@ -329,4 +335,32 @@ class SignalChatMessageIn(Schema):
     @classmethod
     def trim_body(cls, value: str) -> str:
         return _clean_text(value)
+
+
+NotificationKindValue = Literal[
+    "chat_started",
+    "chat_message",
+    "trade_received",
+    "trade_accepted",
+    "trade_rejected",
+    "trade_completed",
+]
+
+
+class LibraryNotificationOut(Schema):
+    id: int
+    kind: NotificationKindValue
+    title: str
+    body: str
+    thread_id: int | None
+    trade_id: int | None
+    post_id: int | None
+    actor: OwnerOut | None
+    read_at: datetime | None
+    created_at: datetime
+
+
+class LibraryNotificationCollectionOut(Schema):
+    items: list[LibraryNotificationOut]
+    unread_count: int
 

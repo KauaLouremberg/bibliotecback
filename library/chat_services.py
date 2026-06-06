@@ -47,15 +47,15 @@ def get_thread_for_user(user: User, thread_id: int) -> SignalChatThread | None:
     return thread
 
 
-def open_signal_chat(post: SocialPost, initiator: User) -> tuple[SignalChatThread | None, str | None]:
+def open_signal_chat(post: SocialPost, initiator: User) -> tuple[SignalChatThread | None, str | None, bool]:
     if initiator.pk == post.owner_id:
-        return None, "Você não pode abrir chat consigo mesmo sobre o seu sinal."
-    thread, _ = SignalChatThread.objects.get_or_create(
+        return None, "Você não pode abrir chat consigo mesmo sobre o seu sinal.", False
+    thread, created = SignalChatThread.objects.get_or_create(
         post=post,
         initiator=initiator,
         defaults={"owner_id": post.owner_id},
     )
-    return thread, None
+    return thread, None, created
 
 
 def create_chat_message(thread: SignalChatThread, sender: User, body: str) -> SignalChatMessage | None:

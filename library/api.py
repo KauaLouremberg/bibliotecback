@@ -1,9 +1,11 @@
 import json
+import random
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from django.core.cache import cache
 from django.db.models import Avg, Count, Q
+from django.utils import timezone
 from ninja import File, Form, Query, Router
 from ninja.files import UploadedFile
 from pydantic import ValidationError
@@ -12,7 +14,8 @@ from accounts.auth import JwtAuth
 from accounts.models import User
 from accounts.schemas import MessageOut
 
-from .models import BookRating, InventoryBook, SignalChatMessage, SignalChatThread, SocialPost, TradeRequest
+from .models import BookRating, InventoryBook, LibraryNotification, SignalChatMessage, SignalChatThread, SocialPost, TradeRequest
+from .notification_services import notify_chat_message, notify_chat_started, notify_trade_received, notify_trade_status
 from .chat_services import (
     broadcast_chat_message,
     close_signal_chat,
@@ -34,6 +37,8 @@ from .schemas import (
     InventoryBookUpdateIn,
     InventoryCollectionOut,
     InventoryStatsOut,
+    LibraryNotificationCollectionOut,
+    LibraryNotificationOut,
     OwnerOut,
     SocialPostIn,
     SocialPostOut,
@@ -164,14 +169,18 @@ def _genre_from_doc(doc: dict, selected_genre: str) -> str:
     return ""
 
 
-def _open_library_search(search: str, genre: str) -> list[dict]:
-    cache_key = f"open-library-search:{search.casefold()}:{genre.casefold()}"
-    cached_docs = cache.get(cache_key)
-    if isinstance(cached_docs, list):
-        return cached_docs
+def _open_library_search(search: str, genre: str, page: int = 1, limit: int = 24) -> tuple[list[dict], int]:
+    cache_key = f"open-library-search:{search.casefold()}:{genre.casefold()}:{page}:{limit}"
+    cached_payload = cache.get(cache_key)
+    if isinstance(cached_payload, dict):
+        docs = cached_payload.get("docs")
+        num_found = cached_payload.get("num_found")
+        if isinstance(docs, list) and isinstance(num_found, int):
+            return docs, num_found
 
     params = {
-        "limit": "30",
+        "limit": str(limit),
+        "page": str(page),
         "fields": ",".join(
             [
                 "key",
@@ -200,12 +209,14 @@ def _open_library_search(search: str, genre: str) -> list[dict]:
         with urlopen(request, timeout=6) as response:
             payload = json.loads(response.read().decode("utf-8"))
     except (OSError, ValueError, TimeoutError):
-        return []
+        return [], 0
     docs = payload.get("docs", [])
     if not isinstance(docs, list):
-        return []
-    cache.set(cache_key, docs, timeout=60 * 60)
-    return docs
+        return [], 0
+    num_found_raw = payload.get("numFound", len(docs))
+    num_found = num_found_raw if isinstance(num_found_raw, int) else len(docs)
+    cache.set(cache_key, {"docs": docs, "num_found": num_found}, timeout=60 * 60)
+    return docs, num_found
 
 
 def _catalog_book_from_doc(doc: dict, selected_genre: str) -> dict:
@@ -618,9 +629,19 @@ def discover_inventory(request, filters: DiscoverInventoryQuery = Query(...)):
 
 @router.get("/catalog", response=CatalogCollectionOut, auth=JwtAuth())
 def list_catalog(request, filters: CatalogQuery = Query(...)):
-    docs = _open_library_search(filters.search, filters.genre)
+    docs, total = _open_library_search(filters.search, filters.genre, filters.page, filters.limit)
     items = [_catalog_book_from_doc(doc, filters.genre) for doc in docs]
-    return CatalogCollectionOut(items=items, genres=CATALOG_GENRES)
+    if filters.page == 1:
+        random.shuffle(items)
+    loaded = filters.page * filters.limit
+    return CatalogCollectionOut(
+        items=items,
+        genres=CATALOG_GENRES,
+        total=total,
+        page=filters.page,
+        limit=filters.limit,
+        has_more=loaded < total,
+    )
 
 
 @router.post("/inventory", response={201: InventoryBookOut, 400: MessageOut, 422: MessageOut}, auth=JwtAuth())
@@ -887,13 +908,14 @@ def open_signal_chat_thread(request, post_id: int):
     post = SocialPost.objects.select_related("owner").filter(pk=post_id).first()
     if post is None:
         return 404, MessageOut(detail="Sinal não encontrado.")
-    thread, error = open_signal_chat(post, viewer)
+    thread, error, created = open_signal_chat(post, viewer)
     if error:
         return 400, MessageOut(detail=error)
     thread = (
         SignalChatThread.objects.select_related("post", "initiator", "owner")
         .get(pk=thread.pk)
     )
+    notify_chat_started(thread, created=created)
     messages, _ = _thread_messages(thread.pk)
     return 200, SignalChatOpenOut(
         thread=_chat_thread_out(thread, viewer_id=viewer.pk),
@@ -973,7 +995,62 @@ def send_signal_chat_message(request, thread_id: int, payload: SignalChatMessage
         return 400, MessageOut(detail="Mensagem inválida.")
     message = SignalChatMessage.objects.select_related("sender").get(pk=message.pk)
     broadcast_chat_message(message)
+    notify_chat_message(message, thread)
     return 201, _chat_message_out(message)
+
+
+def _notification_out(notification: LibraryNotification) -> LibraryNotificationOut:
+    actor = notification.actor
+    return LibraryNotificationOut(
+        id=notification.pk,
+        kind=notification.kind,
+        title=notification.title,
+        body=notification.body,
+        thread_id=notification.thread_id,
+        trade_id=notification.trade_id,
+        post_id=notification.post_id,
+        actor=_owner_out(actor) if actor else None,
+        read_at=notification.read_at,
+        created_at=notification.created_at,
+    )
+
+
+@router.get("/notifications", response=LibraryNotificationCollectionOut, auth=JwtAuth())
+def list_notifications(request):
+    viewer: User = request.auth
+    items = list(
+        LibraryNotification.objects.filter(recipient=viewer)
+        .select_related("actor")
+        .order_by("-created_at", "-id")[:50]
+    )
+    unread_count = LibraryNotification.objects.filter(recipient=viewer, read_at__isnull=True).count()
+    return LibraryNotificationCollectionOut(
+        items=[_notification_out(item) for item in items],
+        unread_count=unread_count,
+    )
+
+
+@router.patch("/notifications/{notification_id}/read", response={200: LibraryNotificationOut, 404: MessageOut}, auth=JwtAuth())
+def mark_notification_read(request, notification_id: int):
+    viewer: User = request.auth
+    notification = (
+        LibraryNotification.objects.filter(pk=notification_id, recipient=viewer)
+        .select_related("actor")
+        .first()
+    )
+    if notification is None:
+        return 404, MessageOut(detail="Notificação não encontrada.")
+    if notification.read_at is None:
+        notification.read_at = timezone.now()
+        notification.save(update_fields=["read_at"])
+    return 200, _notification_out(notification)
+
+
+@router.post("/notifications/read-all", response={204: None}, auth=JwtAuth())
+def mark_all_notifications_read(request):
+    viewer: User = request.auth
+    LibraryNotification.objects.filter(recipient=viewer, read_at__isnull=True).update(read_at=timezone.now())
+    return 204, None
 
 
 @router.post("/trades", response={201: TradeRequestOut, 400: MessageOut, 404: MessageOut}, auth=JwtAuth())
@@ -1003,6 +1080,7 @@ def create_trade_request(request, payload: TradeRequestIn):
         )
         .get(pk=trade.pk)
     )
+    notify_trade_received(trade)
     return 201, _trade_out(trade, viewer_id=requester.pk, request=request)
 
 
@@ -1044,4 +1122,5 @@ def update_trade_status(request, trade_id: int, payload: TradeRequestStatusIn):
         return 400, MessageOut(detail=detail or "Atualização inválida.")
     trade.status = payload.status
     trade.save(update_fields=["status", "updated_at"])
+    notify_trade_status(trade, new_status=payload.status, actor_id=viewer.pk)
     return 200, _trade_out(trade, viewer_id=viewer.pk, request=request)
