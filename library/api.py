@@ -770,13 +770,13 @@ def rate_inventory_book(request, book_id: int, payload: BookRatingIn):
     return 200, _book_out(request, book, viewer_id=viewer.pk, my_rating=payload.rating)
 
 
-@router.delete("/inventory/{book_id}", response={204: None, 404: MessageOut}, auth=JwtAuth())
+@router.delete("/inventory/{book_id}", response={200: MessageOut, 404: MessageOut}, auth=JwtAuth())
 def delete_inventory_book(request, book_id: int):
     owner: User = request.auth
     deleted, _ = InventoryBook.objects.filter(pk=book_id, owner=owner).delete()
     if deleted == 0:
         return 404, MessageOut(detail="Livro não encontrado no seu inventário.")
-    return 204, None
+    return 200, MessageOut(detail="Livro removido.")
 
 
 @router.get("/feed", response=FeedCollectionOut, auth=JwtAuth())
@@ -807,6 +807,19 @@ def list_my_feed(request, filters: FeedQuery = Query(...)):
         items=[_post_out(post, viewer_id=viewer.pk, request=request) for post in posts],
         stats=_feed_stats(posts),
     )
+
+
+@router.get("/feed/mine/{post_id}", response={200: SocialPostOut, 404: MessageOut}, auth=JwtAuth())
+def get_my_post(request, post_id: int):
+    viewer: User = request.auth
+    post = (
+        SocialPost.objects.filter(pk=post_id, owner=viewer)
+        .select_related("owner", "inventory_book")
+        .first()
+    )
+    if post is None:
+        return 404, MessageOut(detail="Sinal não encontrado.")
+    return 200, _post_out(post, viewer_id=viewer.pk, request=request)
 
 
 @router.post("/feed", response={201: SocialPostOut, 400: MessageOut}, auth=JwtAuth())
@@ -842,13 +855,13 @@ def update_post(request, post_id: int, payload: SocialPostUpdateIn):
     return 200, _post_out(post, viewer_id=owner.pk, request=request)
 
 
-@router.delete("/feed/{post_id}", response={204: None, 404: MessageOut}, auth=JwtAuth())
+@router.delete("/feed/{post_id}", response={200: MessageOut, 404: MessageOut}, auth=JwtAuth())
 def delete_post(request, post_id: int):
     owner: User = request.auth
     deleted, _ = SocialPost.objects.filter(pk=post_id, owner=owner).delete()
     if deleted == 0:
         return 404, MessageOut(detail="Sinal não encontrado.")
-    return 204, None
+    return 200, MessageOut(detail="Sinal removido.")
 
 
 def _chat_message_out(message: SignalChatMessage) -> SignalChatMessageOut:
@@ -951,7 +964,7 @@ def get_signal_chat_thread(request, thread_id: int):
 
 @router.delete(
     "/chats/{thread_id}",
-    response={204: None, 404: MessageOut},
+    response={200: MessageOut, 404: MessageOut},
     auth=JwtAuth(),
 )
 def close_signal_chat_thread(request, thread_id: int):
@@ -959,7 +972,7 @@ def close_signal_chat_thread(request, thread_id: int):
     closed, error = close_signal_chat(viewer, thread_id)
     if not closed:
         return 404, MessageOut(detail=error or "Conversa não encontrada.")
-    return 204, None
+    return 200, MessageOut(detail="Conversa encerrada.")
 
 
 @router.get(
@@ -1046,11 +1059,11 @@ def mark_notification_read(request, notification_id: int):
     return 200, _notification_out(notification)
 
 
-@router.post("/notifications/read-all", response={204: None}, auth=JwtAuth())
+@router.post("/notifications/read-all", response={200: MessageOut}, auth=JwtAuth())
 def mark_all_notifications_read(request):
     viewer: User = request.auth
     LibraryNotification.objects.filter(recipient=viewer, read_at__isnull=True).update(read_at=timezone.now())
-    return 204, None
+    return 200, MessageOut(detail="Notificações marcadas como lidas.")
 
 
 @router.post("/trades", response={201: TradeRequestOut, 400: MessageOut, 404: MessageOut}, auth=JwtAuth())
