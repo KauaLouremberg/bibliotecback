@@ -15,7 +15,12 @@ from accounts.models import User
 from accounts.schemas import MessageOut
 
 from .models import BookRating, InventoryBook, LibraryNotification, SignalChatMessage, SignalChatThread, SocialPost, TradeRequest
-from .notification_services import notify_chat_message, notify_chat_started, notify_trade_received, notify_trade_status
+from .notification_services import (
+    notify_chat_message,
+    notify_chat_started,
+    safe_notify_trade_received,
+    safe_notify_trade_status,
+)
 from .chat_services import (
     broadcast_chat_message,
     close_signal_chat,
@@ -93,8 +98,11 @@ def _owner_out(user: User) -> OwnerOut:
 
 def _media_url(request, file_field, fallback: str) -> str:
     if file_field:
-        return request.build_absolute_uri(file_field.url)
-    return fallback
+        try:
+            return request.build_absolute_uri(file_field.url)
+        except (OSError, ValueError):
+            pass
+    return fallback or ""
 
 
 def _book_preview(book: InventoryBook, request=None) -> InventoryBookPreviewOut:
@@ -852,6 +860,13 @@ def update_post(request, post_id: int, payload: SocialPostUpdateIn):
     ):
         return 400, MessageOut(detail="Livro do inventário não encontrado.")
     post = _apply_post_updates(post, payload, owner)
+    post.refresh_from_db()
+    if post.inventory_book_id:
+        post = (
+            SocialPost.objects.filter(pk=post.pk, owner=owner)
+            .select_related("owner", "inventory_book")
+            .first()
+        )
     return 200, _post_out(post, viewer_id=owner.pk, request=request)
 
 
@@ -1093,7 +1108,7 @@ def create_trade_request(request, payload: TradeRequestIn):
         )
         .get(pk=trade.pk)
     )
-    notify_trade_received(trade)
+    safe_notify_trade_received(trade)
     return 201, _trade_out(trade, viewer_id=requester.pk, request=request)
 
 
@@ -1103,10 +1118,12 @@ def list_my_trades(request):
     incoming = list(
         TradeRequest.objects.filter(owner=viewer)
         .select_related("requester", "owner", "book_requested", "book_offered")
+        .order_by("-updated_at", "-created_at")
     )
     outgoing = list(
         TradeRequest.objects.filter(requester=viewer)
         .select_related("requester", "owner", "book_requested", "book_offered")
+        .order_by("-updated_at", "-created_at")
     )
     return TradeRequestCollectionOut(
         incoming=[_trade_out(trade, viewer_id=viewer.pk, request=request) for trade in incoming],
@@ -1135,5 +1152,5 @@ def update_trade_status(request, trade_id: int, payload: TradeRequestStatusIn):
         return 400, MessageOut(detail=detail or "Atualização inválida.")
     trade.status = payload.status
     trade.save(update_fields=["status", "updated_at"])
-    notify_trade_status(trade, new_status=payload.status, actor_id=viewer.pk)
+    safe_notify_trade_status(trade, new_status=payload.status, actor_id=viewer.pk)
     return 200, _trade_out(trade, viewer_id=viewer.pk, request=request)

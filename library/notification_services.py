@@ -1,10 +1,22 @@
+import logging
+
 from accounts.models import User
 
 from .models import LibraryNotification, SignalChatMessage, SignalChatThread, TradeRequest
 
+logger = logging.getLogger(__name__)
+
+
+def _truncate(text: str, max_len: int) -> str:
+    if len(text) <= max_len:
+        return text
+    if max_len <= 1:
+        return text[:max_len]
+    return text[: max_len - 1].rstrip() + "…"
+
 
 def _actor_label(user: User) -> str:
-    return user.full_name.strip() or user.email
+    return (user.full_name or "").strip() or user.email
 
 
 def notify(
@@ -23,8 +35,8 @@ def notify(
     LibraryNotification.objects.create(
         recipient_id=recipient_id,
         kind=kind,
-        title=title,
-        body=body,
+        title=_truncate(title, 255),
+        body=_truncate(body, 500),
         actor_id=actor_id,
         thread_id=thread_id,
         trade_id=trade_id,
@@ -83,7 +95,10 @@ def notify_trade_status(trade: TradeRequest, *, new_status: str, actor_id: int) 
     labels = {
         TradeRequest.Status.ACCEPTED: ("Proposta aceita", f"{_actor_label(trade.owner)} aceitou «{book.title}»."),
         TradeRequest.Status.REJECTED: ("Proposta recusada", f"{_actor_label(trade.owner)} recusou «{book.title}»."),
-        TradeRequest.Status.COMPLETED: ("Negociação concluída", f"{_actor_label(actor)} marcou «{book.title}» como concluída."),
+        TradeRequest.Status.COMPLETED: (
+            "Negociação concluída",
+            f"{_actor_label(actor)} marcou «{book.title}» como concluída.",
+        ),
     }
     kind_map = {
         TradeRequest.Status.ACCEPTED: LibraryNotification.Kind.TRADE_ACCEPTED,
@@ -100,3 +115,17 @@ def notify_trade_status(trade: TradeRequest, *, new_status: str, actor_id: int) 
         actor_id=actor_id,
         trade_id=trade.pk,
     )
+
+
+def safe_notify_trade_status(trade: TradeRequest, *, new_status: str, actor_id: int) -> None:
+    try:
+        notify_trade_status(trade, new_status=new_status, actor_id=actor_id)
+    except Exception:
+        logger.exception("Falha ao criar notificação de troca %s (status=%s)", trade.pk, new_status)
+
+
+def safe_notify_trade_received(trade: TradeRequest) -> None:
+    try:
+        notify_trade_received(trade)
+    except Exception:
+        logger.exception("Falha ao criar notificação de proposta recebida %s", trade.pk)
