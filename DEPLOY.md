@@ -13,14 +13,29 @@
 Projeto já criado: **Acervo Digital** (`lcwqriuenyubloalczsu`).
 
 1. [Supabase Dashboard](https://supabase.com/dashboard/project/lcwqriuenyubloalczsu/settings/database) → **Database** → **Connection string**
-2. Escolha **URI** e **Session pooler** (porta **5432**)
-3. Copie a URL e garanta `?sslmode=require` no final
+2. Escolha **URI** → **Session pooler** → porta **5432**
+3. O usuário deve ser **`postgres`** (não `postgres.lcwqriuenyubloalczsu`)
+4. Adicione `?sslmode=require` no final se não vier na URL
 
-Exemplo:
+**Correto (Session pooler — recomendado para Django no Render):**
 
 ```
-postgresql://postgres.lcwqriuenyubloalczsu:[SUA-SENHA]@aws-0-us-east-2.pooler.supabase.com:5432/postgres?sslmode=require
+postgresql://postgres:[SUA-SENHA]@aws-0-us-east-2.pooler.supabase.com:5432/postgres?sslmode=require
 ```
+
+**Alternativa (Transaction pooler — porta 6543, usuário com sufixo do projeto):**
+
+```
+postgresql://postgres.lcwqriuenyubloalczsu:[SUA-SENHA]@aws-0-us-east-2.pooler.supabase.com:6543/postgres?sslmode=require
+```
+
+**Alternativa (conexão direta):**
+
+```
+postgresql://postgres:[SUA-SENHA]@db.lcwqriuenyubloalczsu.supabase.co:5432/postgres?sslmode=require
+```
+
+> **Erro `tenant/user postgres.lcwqriuenyubloalczsu not found`:** você usou o usuário do Transaction pooler na porta 5432. Troque para `postgres` na 5432 ou mude para a porta 6543.
 
 O schema Django já foi aplicado via migrations no Supabase. Novas migrations locais:
 
@@ -40,8 +55,8 @@ O `render.yaml` já está no GitHub (`main`). Siga:
    https://dashboard.render.com/blueprint/new?repo=https://github.com/KauaLouremberg/bibliotecback
 3. Autorize o repositório se pedido
 4. **Obrigatório:** preencha **`DATABASE_URL`** antes do deploy (secret vazio = build/start falha)
-   - Supabase → Database → Connection string → **URI** → **Session pooler** (5432)
-   - Exemplo: `postgresql://postgres.lcwqriuenyubloalczsu:[SENHA]@aws-0-us-east-2.pooler.supabase.com:5432/postgres?sslmode=require`
+   - Supabase → Database → Connection string → **URI** → **Session pooler** (5432), usuário **`postgres`**
+   - Exemplo: `postgresql://postgres:[SENHA]@aws-0-us-east-2.pooler.supabase.com:5432/postgres?sslmode=require`
 5. Clique **Apply**
    - `acervo-api` (web, Python, free)
    - `acervo-redis` (Key Value, free)
