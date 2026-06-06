@@ -6,6 +6,7 @@ from django.core.cache import cache
 from django.db.models import Avg, Count, Q
 from ninja import File, Form, Query, Router
 from ninja.files import UploadedFile
+from pydantic import ValidationError
 
 from accounts.auth import JwtAuth
 from accounts.models import User
@@ -344,6 +345,19 @@ def _parse_int(value):
     return parsed
 
 
+def _request_content_type(request) -> str:
+    return (request.content_type or "").split(";")[0].strip().lower()
+
+
+def _validation_error_message(exc: ValidationError) -> str:
+    messages = []
+    for err in exc.errors():
+        loc = ".".join(str(part) for part in err.get("loc", ()))
+        msg = err.get("msg", "Valor inválido.")
+        messages.append(f"{loc}: {msg}" if loc else msg)
+    return "; ".join(messages) if messages else "Dados inválidos."
+
+
 def _inventory_payload(
     title: str | None = None,
     author: str | None = None,
@@ -567,60 +581,99 @@ def list_catalog(request, filters: CatalogQuery = Query(...)):
     return CatalogCollectionOut(items=items, genres=CATALOG_GENRES)
 
 
-@router.post("/inventory", response={201: InventoryBookOut}, auth=JwtAuth())
-def create_inventory_book(
-    request,
-    title: str = Form(...),
-    author: str = Form(...),
-    description: str = Form(""),
-    genre: str = Form(""),
-    published_year=Form(None),
-    publisher: str = Form(""),
-    isbn: str = Form(""),
-    page_count=Form(None),
-    cover_url: str = Form(""),
-    has_physical_copy=Form(False),
-    sharing_status: str = Form("private"),
-    location_label: str = Form(""),
-    cover_image: UploadedFile | None = File(None),
-):
+@router.post("/inventory", response={201: InventoryBookOut, 400: MessageOut, 422: MessageOut}, auth=JwtAuth())
+def create_inventory_book(request):
     owner: User = request.auth
-    payload = _inventory_payload(
-        title=title,
-        author=author,
-        description=description,
-        genre=genre,
-        published_year=published_year,
-        publisher=publisher,
-        isbn=isbn,
-        page_count=page_count,
-        cover_url=cover_url,
-        has_physical_copy=has_physical_copy,
-        sharing_status=sharing_status,
-        location_label=location_label,
-    )
-    book = InventoryBook.objects.create(owner=owner, **payload.dict())
+
+    if _request_content_type(request) == "application/json":
+        try:
+            payload = InventoryBookIn.model_validate_json(request.body)
+        except ValidationError as exc:
+            return 422, MessageOut(detail=_validation_error_message(exc))
+        book = InventoryBook.objects.create(owner=owner, **payload.model_dump())
+        return 201, _book_out(request, book, viewer_id=owner.pk)
+
+    try:
+        payload = _inventory_payload(
+            title=request.POST.get("title"),
+            author=request.POST.get("author"),
+            description=request.POST.get("description"),
+            genre=request.POST.get("genre"),
+            published_year=request.POST.get("published_year"),
+            publisher=request.POST.get("publisher"),
+            isbn=request.POST.get("isbn"),
+            page_count=request.POST.get("page_count"),
+            cover_url=request.POST.get("cover_url"),
+            has_physical_copy=request.POST.get("has_physical_copy"),
+            sharing_status=request.POST.get("sharing_status"),
+            location_label=request.POST.get("location_label"),
+        )
+    except ValidationError as exc:
+        return 422, MessageOut(detail=_validation_error_message(exc))
+
+    book = InventoryBook.objects.create(owner=owner, **payload.model_dump())
+    cover_image = request.FILES.get("cover_image")
     if cover_image is not None:
         book.cover_image.save(cover_image.name, cover_image)
     return 201, _book_out(request, book, viewer_id=owner.pk)
 
 
-@router.patch("/inventory/{book_id}", response={200: InventoryBookOut, 404: MessageOut}, auth=JwtAuth())
-def update_inventory_book(
+@router.patch(
+    "/inventory/{book_id}",
+    response={200: InventoryBookOut, 404: MessageOut, 422: MessageOut},
+    auth=JwtAuth(),
+)
+def update_inventory_book(request, book_id: int):
+    owner: User = request.auth
+    book = InventoryBook.objects.filter(pk=book_id, owner=owner).select_related("owner").first()
+    if book is None:
+        return 404, MessageOut(detail="Livro não encontrado no seu inventário.")
+
+    if _request_content_type(request) == "application/json":
+        try:
+            payload = InventoryBookUpdateIn.model_validate_json(request.body)
+        except ValidationError as exc:
+            return 422, MessageOut(detail=_validation_error_message(exc))
+        book = _apply_book_updates(book, payload)
+        return 200, _book_out(request, book, viewer_id=owner.pk)
+
+    try:
+        payload = _inventory_update_payload(
+            title=request.POST.get("title"),
+            author=request.POST.get("author"),
+            description=request.POST.get("description"),
+            genre=request.POST.get("genre"),
+            published_year=request.POST.get("published_year"),
+            publisher=request.POST.get("publisher"),
+            isbn=request.POST.get("isbn"),
+            page_count=request.POST.get("page_count"),
+            cover_url=request.POST.get("cover_url"),
+            has_physical_copy=request.POST.get("has_physical_copy"),
+            sharing_status=request.POST.get("sharing_status"),
+            location_label=request.POST.get("location_label"),
+        )
+    except ValidationError as exc:
+        return 422, MessageOut(detail=_validation_error_message(exc))
+
+    book = _apply_book_updates(book, payload)
+    cover_image = request.FILES.get("cover_image")
+    if cover_image is not None or request.POST.get("remove_cover") is not None:
+        _apply_cover_change(
+            book,
+            cover_image=cover_image,
+            remove_cover=request.POST.get("remove_cover"),
+        )
+    return 200, _book_out(request, book, viewer_id=owner.pk)
+
+
+@router.patch(
+    "/inventory/{book_id}/cover",
+    response={200: InventoryBookOut, 404: MessageOut},
+    auth=JwtAuth(),
+)
+def update_inventory_book_cover(
     request,
     book_id: int,
-    title: str | None = Form(None),
-    author: str | None = Form(None),
-    description: str | None = Form(None),
-    genre: str | None = Form(None),
-    published_year=Form(None),
-    publisher: str | None = Form(None),
-    isbn: str | None = Form(None),
-    page_count=Form(None),
-    cover_url: str | None = Form(None),
-    has_physical_copy=Form(None),
-    sharing_status: str | None = Form(None),
-    location_label: str | None = Form(None),
     cover_image: UploadedFile | None = File(None),
     remove_cover=Form(False),
 ):
@@ -628,21 +681,6 @@ def update_inventory_book(
     book = InventoryBook.objects.filter(pk=book_id, owner=owner).select_related("owner").first()
     if book is None:
         return 404, MessageOut(detail="Livro não encontrado no seu inventário.")
-    payload = _inventory_update_payload(
-        title=title,
-        author=author,
-        description=description,
-        genre=genre,
-        published_year=published_year,
-        publisher=publisher,
-        isbn=isbn,
-        page_count=page_count,
-        cover_url=cover_url,
-        has_physical_copy=has_physical_copy,
-        sharing_status=sharing_status,
-        location_label=location_label,
-    )
-    book = _apply_book_updates(book, payload)
     _apply_cover_change(book, cover_image=cover_image, remove_cover=remove_cover)
     return 200, _book_out(request, book, viewer_id=owner.pk)
 
