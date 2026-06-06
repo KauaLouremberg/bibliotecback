@@ -9,8 +9,8 @@ services:
     plan: free
     region: virginia
     branch: main
-    buildCommand: pip install -r requirements.txt && python manage.py migrate --noinput
-    startCommand: uvicorn config.asgi:application --host 0.0.0.0 --port $PORT
+    buildCommand: pip install -r requirements.txt
+    startCommand: bash bin/render-start.sh
     healthCheckPath: /api/health
     envVars:
       - key: PYTHON_VERSION

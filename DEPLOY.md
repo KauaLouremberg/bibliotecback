@@ -39,12 +39,15 @@ O `render.yaml` já está no GitHub (`main`). Siga:
 2. **Abrir o Blueprint** (link direto):
    https://dashboard.render.com/blueprint/new?repo=https://github.com/KauaLouremberg/bibliotecback
 3. Autorize o repositório se pedido
-4. Na tela do Blueprint, preencha **`DATABASE_URL`** (secret) com a URI do Supabase (Session pooler, `sslmode=require`)
-5. Clique **Apply** — serão criados:
+4. **Obrigatório:** preencha **`DATABASE_URL`** antes do deploy (secret vazio = build/start falha)
+   - Supabase → Database → Connection string → **URI** → **Session pooler** (5432)
+   - Exemplo: `postgresql://postgres.lcwqriuenyubloalczsu:[SENHA]@aws-0-us-east-2.pooler.supabase.com:5432/postgres?sslmode=require`
+5. Clique **Apply**
    - `acervo-api` (web, Python, free)
    - `acervo-redis` (Key Value, free)
-6. Aguarde deploy **Live** (~5–10 min na primeira vez)
-7. Teste: `https://acervo-api.onrender.com/api/health`
+6. Se o serviço já existir sem `DATABASE_URL`: **Environment** → adicione → **Manual Deploy**
+7. Aguarde deploy **Live** (~5–10 min na primeira vez)
+8. Teste: `https://acervo-api.onrender.com/api/health`
 
 ### Plugin MCP Render no Cursor (opcional, para eu gerenciar daqui)
 
