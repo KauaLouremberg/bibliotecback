@@ -31,6 +31,28 @@ python manage.py migrate
 
 ## 2. Render (backend)
 
+### Passo a passo (agora)
+
+O `render.yaml` já está no GitHub (`main`). Siga:
+
+1. **Conectar GitHub ao Render** (se ainda não fez): https://dashboard.render.com → Account Settings → GitHub
+2. **Abrir o Blueprint** (link direto):
+   https://dashboard.render.com/blueprint/new?repo=https://github.com/KauaLouremberg/bibliotecback
+3. Autorize o repositório se pedido
+4. Na tela do Blueprint, preencha **`DATABASE_URL`** (secret) com a URI do Supabase (Session pooler, `sslmode=require`)
+5. Clique **Apply** — serão criados:
+   - `acervo-api` (web, Python, free)
+   - `acervo-redis` (Key Value, free)
+6. Aguarde deploy **Live** (~5–10 min na primeira vez)
+7. Teste: `https://acervo-api.onrender.com/api/health`
+
+### Plugin MCP Render no Cursor (opcional, para eu gerenciar daqui)
+
+1. Crie uma API key: https://dashboard.render.com/u/settings#api-keys
+2. Copie [`.cursor/mcp.render.example.json`](.cursor/mcp.render.example.json) para `~/.cursor/mcp.json` (ou adicione o bloco `render` ao arquivo existente)
+3. Troque `COLE_SUA_API_KEY_AQUI` por `rnd_...`
+4. **Reinicie o Cursor** e peça: *“cria o serviço no Render”*
+
 ### Opção A — Blueprint (recomendado)
 
 1. Faça push do `render.yaml` para `https://github.com/KauaLouremberg/bibliotecback`
