@@ -25,6 +25,7 @@ from .schemas import (
     CatalogCollectionOut,
     CatalogQuery,
     FeedCollectionOut,
+    FeedQuery,
     FeedStatsOut,
     DiscoverInventoryQuery,
     InventoryBookIn,
@@ -299,6 +300,34 @@ def _feed_stats(posts: list[SocialPost]) -> FeedStatsOut:
         exchange_posts=sum(1 for post in posts if post.intent == SocialPost.Intent.EXCHANGE),
         loan_posts=sum(1 for post in posts if post.intent == SocialPost.Intent.LOAN),
     )
+
+
+def _apply_feed_filters(queryset, filters: FeedQuery):
+    if filters.intent:
+        queryset = queryset.filter(intent=filters.intent)
+    if filters.search:
+        term = filters.search
+        queryset = queryset.filter(
+            Q(book_title__icontains=term)
+            | Q(book_author__icontains=term)
+            | Q(caption__icontains=term)
+            | Q(location_label__icontains=term)
+            | Q(owner__full_name__icontains=term)
+            | Q(owner__email__icontains=term)
+            | Q(inventory_book__title__icontains=term)
+            | Q(inventory_book__author__icontains=term)
+        )
+    if filters.author:
+        queryset = queryset.filter(
+            Q(book_author__icontains=filters.author)
+            | Q(inventory_book__author__icontains=filters.author)
+        )
+    if filters.book_title:
+        queryset = queryset.filter(
+            Q(book_title__icontains=filters.book_title)
+            | Q(inventory_book__title__icontains=filters.book_title)
+        )
+    return queryset
 
 
 def _trade_out(trade: TradeRequest, viewer_id: int, request=None) -> TradeRequestOut:
@@ -730,12 +759,13 @@ def delete_inventory_book(request, book_id: int):
 
 
 @router.get("/feed", response=FeedCollectionOut, auth=JwtAuth())
-def list_feed(request):
+def list_feed(request, filters: FeedQuery = Query(...)):
     viewer: User = request.auth
     posts = list(
-        SocialPost.objects.exclude(owner=viewer)
-        .select_related("owner", "inventory_book")
-        .order_by("-created_at")
+        _apply_feed_filters(
+            SocialPost.objects.exclude(owner=viewer).select_related("owner", "inventory_book"),
+            filters,
+        ).order_by("-created_at")
     )
     return FeedCollectionOut(
         items=[_post_out(post, viewer_id=viewer.pk, request=request) for post in posts],
@@ -744,12 +774,13 @@ def list_feed(request):
 
 
 @router.get("/feed/mine", response=FeedCollectionOut, auth=JwtAuth())
-def list_my_feed(request):
+def list_my_feed(request, filters: FeedQuery = Query(...)):
     viewer: User = request.auth
     posts = list(
-        SocialPost.objects.filter(owner=viewer)
-        .select_related("owner", "inventory_book")
-        .order_by("-created_at")
+        _apply_feed_filters(
+            SocialPost.objects.filter(owner=viewer).select_related("owner", "inventory_book"),
+            filters,
+        ).order_by("-created_at")
     )
     return FeedCollectionOut(
         items=[_post_out(post, viewer_id=viewer.pk, request=request) for post in posts],

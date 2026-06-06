@@ -225,6 +225,18 @@ class FeedCollectionOut(Schema):
     stats: FeedStatsOut
 
 
+class FeedQuery(Schema):
+    search: str = Field(default="", max_length=255)
+    author: str = Field(default="", max_length=255)
+    book_title: str = Field(default="", max_length=255)
+    intent: PostIntentValue | None = None
+
+    @field_validator("search", "author", "book_title")
+    @classmethod
+    def trim_feed_filters(cls, value: str) -> str:
+        return _clean_optional_text(value)
+
+
 class TradeRequestIn(Schema):
     book_requested_id: int
     book_offered_id: int | None = None
